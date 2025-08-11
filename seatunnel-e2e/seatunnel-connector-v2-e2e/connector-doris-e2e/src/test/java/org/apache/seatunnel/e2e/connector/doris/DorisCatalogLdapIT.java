@@ -17,7 +17,6 @@
 
 package org.apache.seatunnel.e2e.connector.doris;
 
-import java.sql.Driver;
 import org.apache.seatunnel.shade.com.google.common.collect.Lists;
 
 import org.apache.seatunnel.api.configuration.ReadonlyConfig;
@@ -42,6 +41,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.sql.Driver;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
