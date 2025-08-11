@@ -295,10 +295,12 @@ public class DorisCatalog implements Catalog {
      */
     private void configureLdapAuthentication(Properties connectionInfo, String driverClassName) {
         if (!enableLdap) {
+            LOG.info("enable ldap false");
             return;
         }
 
-        LOG.debug("Configuring LDAP authentication for driver: {}", driverClassName);
+        LOG.info("Configuring LDAP authentication for driver: {}", driverClassName);
+        LOG.info("connectionInfo is {}", connectionInfo);
 
         if (StringUtils.containsIgnoreCase(driverClassName, "com.mysql.cj")) {
             // MySQL 8.x Connector/J LDAP authentication support needs improvement
@@ -315,10 +317,10 @@ public class DorisCatalog implements Catalog {
             connectionInfo.put(
                     "disabledAuthenticationPlugins",
                     "com.mysql.jdbc.authentication.MysqlNativePasswordPlugin");
-            LOG.debug("Applied MySQL 5.x LDAP authentication configuration");
+            LOG.info("Applied MySQL 5.x LDAP authentication configuration");
 
         } else {
-            LOG.warn(
+            LOG.info(
                     "Unknown MySQL driver type [{}], LDAP configuration may not work properly",
                     driverClassName);
         }

@@ -236,7 +236,7 @@ public class DorisCatalogLdapIT extends AbstractDorisIT {
             Class.forName("com.mysql.jdbc.Driver");
             Driver driver = (Driver) urlClassLoader.loadClass(getDriverClass()).newInstance();
             log.info("find driver is {}", driver.getClass().getName());
-            DriverManager.registerDriver(driver);
+            //            DriverManager.registerDriver(driver);
             Enumeration<Driver> drivers = DriverManager.getDrivers();
             while (drivers.hasMoreElements()) {
                 log.info("dirver is {}", drivers.nextElement().getClass().getName());
