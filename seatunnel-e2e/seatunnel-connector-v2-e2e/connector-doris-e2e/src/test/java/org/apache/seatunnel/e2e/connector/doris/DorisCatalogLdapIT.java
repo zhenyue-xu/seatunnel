@@ -232,7 +232,9 @@ public class DorisCatalogLdapIT extends AbstractDorisIT {
                             new URL[] {new URL(getDriverJar())}, this.getClass().getClassLoader());
             Thread.currentThread().setContextClassLoader(urlClassLoader);
             urlClassLoader.loadClass(getDriverClass()).newInstance();
+            Class.forName("com.mysql.jdbc.Driver");
             Driver driver = (Driver) urlClassLoader.loadClass(getDriverClass()).newInstance();
+            log.info("find driver is {}", driver.getClass().getName());
             DriverManager.registerDriver(driver);
             String catalogName = "doris-ldap-config";
             String frontEndNodes = container.getHost() + ":" + container.getMappedPort(HTTP_PORT);
