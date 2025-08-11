@@ -45,6 +45,7 @@ import java.sql.Driver;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
@@ -236,6 +237,10 @@ public class DorisCatalogLdapIT extends AbstractDorisIT {
             Driver driver = (Driver) urlClassLoader.loadClass(getDriverClass()).newInstance();
             log.info("find driver is {}", driver.getClass().getName());
             DriverManager.registerDriver(driver);
+            Enumeration<Driver> drivers = DriverManager.getDrivers();
+            while (drivers.hasMoreElements()) {
+                log.info("dirver is {}", drivers.nextElement().getClass().getName());
+            }
             String catalogName = "doris-ldap-config";
             String frontEndNodes = container.getHost() + ":" + container.getMappedPort(HTTP_PORT);
             String queryPort = String.valueOf(container.getMappedPort(QUERY_PORT));
