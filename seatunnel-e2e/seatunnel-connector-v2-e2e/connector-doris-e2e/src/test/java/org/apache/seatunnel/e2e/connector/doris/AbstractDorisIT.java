@@ -52,7 +52,7 @@ import static org.awaitility.Awaitility.given;
 public abstract class AbstractDorisIT extends TestSuiteBase implements TestResource {
 
     protected GenericContainer<?> container;
-    private static final String DOCKER_IMAGE = "apache/doris:doris-all-in-one-2.1.0";
+    protected static final String DOCKER_IMAGE = "apache/doris:doris-all-in-one-2.1.0";
     protected static final String HOST = "doris_e2e";
     protected static final int QUERY_PORT = 9030;
     protected static final int HTTP_PORT = 8030;
@@ -70,8 +70,16 @@ public abstract class AbstractDorisIT extends TestSuiteBase implements TestResou
     private static final String DROP_BE = "ALTER SYSTEM DROPP BACKEND \"127.0.0.1:9050\"";
     private static final String ADD_BE = "ALTER SYSTEM ADD BACKEND \"%s:9050\"";
     protected static final String DRIVER_CLASS = "com.mysql.cj.jdbc.Driver";
-    protected static final String DRIVER_JAR =
+    protected String DRIVER_JAR =
             "https://repo1.maven.org/maven2/com/mysql/mysql-connector-j/8.0.32/mysql-connector-j-8.0.32.jar";
+
+    protected String getDriverJar() {
+        return DRIVER_JAR;
+    }
+
+    protected String getDriverClass() {
+        return DRIVER_CLASS;
+    }
 
     @BeforeAll
     @Override
@@ -100,9 +108,10 @@ public abstract class AbstractDorisIT extends TestSuiteBase implements TestResou
                     InstantiationException, IllegalAccessException {
         log.info("doris initializing ...");
         URLClassLoader urlClassLoader =
-                new URLClassLoader(new URL[] {new URL(DRIVER_JAR)}, DorisIT.class.getClassLoader());
+                new URLClassLoader(
+                        new URL[] {new URL(getDriverJar())}, DorisIT.class.getClassLoader());
         Thread.currentThread().setContextClassLoader(urlClassLoader);
-        Driver driver = (Driver) urlClassLoader.loadClass(DRIVER_CLASS).newInstance();
+        Driver driver = (Driver) urlClassLoader.loadClass(getDriverClass()).newInstance();
         Properties props = new Properties();
         props.put("user", USERNAME);
         props.put("password", PASSWORD);

@@ -228,9 +228,12 @@ public class DorisCatalog implements Catalog {
         LOG.debug("Attempting connection with specific driver: {}", targetDriverClass);
 
         Enumeration<Driver> drivers = DriverManager.getDrivers();
+        LOG.info("all driver class is {}", drivers);
+        LOG.info("target driver class is {}", targetDriverClass);
         while (drivers.hasMoreElements()) {
             Driver driver = drivers.nextElement();
             if (StringUtils.equals(driver.getClass().getName(), targetDriverClass)) {
+                LOG.info("driver equals" + targetDriverClass);
                 Connection connection = tryConnectWithDriver(driver, jdbcUrl, connectionInfo);
                 if (connection != null) {
                     LOG.info("Successfully connected using driver: {}", targetDriverClass);
