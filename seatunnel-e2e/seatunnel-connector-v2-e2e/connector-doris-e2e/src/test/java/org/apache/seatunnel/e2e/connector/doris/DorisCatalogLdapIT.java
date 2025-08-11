@@ -17,6 +17,7 @@
 
 package org.apache.seatunnel.e2e.connector.doris;
 
+import java.sql.Driver;
 import org.apache.seatunnel.shade.com.google.common.collect.Lists;
 
 import org.apache.seatunnel.api.configuration.ReadonlyConfig;
@@ -231,6 +232,8 @@ public class DorisCatalogLdapIT extends AbstractDorisIT {
                             new URL[] {new URL(getDriverJar())}, this.getClass().getClassLoader());
             Thread.currentThread().setContextClassLoader(urlClassLoader);
             urlClassLoader.loadClass(getDriverClass()).newInstance();
+            Driver driver = (Driver) urlClassLoader.loadClass(getDriverClass()).newInstance();
+            DriverManager.registerDriver(driver);
             String catalogName = "doris-ldap-config";
             String frontEndNodes = container.getHost() + ":" + container.getMappedPort(HTTP_PORT);
             String queryPort = String.valueOf(container.getMappedPort(QUERY_PORT));
