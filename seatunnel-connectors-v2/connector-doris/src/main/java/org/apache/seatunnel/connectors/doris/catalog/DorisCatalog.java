@@ -262,7 +262,7 @@ public class DorisCatalog implements Catalog {
             Driver driver, String jdbcUrl, Properties connectionInfo) {
         try {
             String driverClassName = driver.getClass().getName();
-            LOG.debug("Attempting connection with driver: {}", driverClassName);
+            LOG.info("Attempting connection with driver: {}", driverClassName);
 
             // Create a copy of connection info to avoid modifying the original
             Properties driverSpecificInfo = new Properties();
@@ -275,10 +275,11 @@ public class DorisCatalog implements Catalog {
             return driver.connect(jdbcUrl, driverSpecificInfo);
 
         } catch (Exception e) {
-            LOG.debug(
+            LOG.info(
                     "Connection attempt failed with driver [{}]: {}",
                     driver.getClass().getName(),
                     e.getMessage());
+            LOG.info("error", e);
             return null;
         }
     }
