@@ -41,6 +41,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.net.UnknownHostException;
 import java.sql.Driver;
 import java.sql.DriverManager;
 import java.sql.SQLException;
@@ -124,7 +125,9 @@ public class DorisCatalogLdapIT extends AbstractDorisIT {
                                 "/bin/bash",
                                 "-c",
                                 "echo 'authentication_type=ldap' >> /opt/apache-doris/fe/conf/fe.conf && "
-                                        + "echo 'ldap_host = host.docker.internal' > /opt/apache-doris/fe/conf/ldap.conf && "
+                                        + "echo 'ldap_host = "
+                                        + getHostIP()
+                                        + "' > /opt/apache-doris/fe/conf/ldap.conf && "
                                         + "echo 'ldap_port = "
                                         + LDAP_PORT
                                         + "' >> /opt/apache-doris/fe/conf/ldap.conf && "
@@ -156,6 +159,14 @@ public class DorisCatalogLdapIT extends AbstractDorisIT {
                 .atMost(360, TimeUnit.SECONDS)
                 .untilAsserted(this::initializeJdbcConnection);
         log.info("doris initialized");
+    }
+
+    private String getHostIP() {
+        try {
+            return java.net.InetAddress.getLocalHost().getHostAddress();
+        } catch (UnknownHostException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private static void setupLdapEntries() throws Exception {
