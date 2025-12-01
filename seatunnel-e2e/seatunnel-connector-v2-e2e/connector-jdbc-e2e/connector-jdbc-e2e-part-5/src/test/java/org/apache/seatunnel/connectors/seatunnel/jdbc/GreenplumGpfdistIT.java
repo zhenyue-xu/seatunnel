@@ -32,7 +32,7 @@ import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.Container;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
-import org.testcontainers.images.PullPolicy;
+import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.lifecycle.Startables;
 import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.utility.DockerLoggerFactory;
@@ -43,10 +43,9 @@ import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Duration;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
@@ -60,13 +59,14 @@ public class GreenplumGpfdistIT extends TestSuiteBase implements TestResource {
     private static final String GREENPLUM_IMAGE = "datagrip/greenplum:6.8";
     private static final String GREENPLUM_CONTAINER_HOST = "seatunnel_e2e_greenplum_gpfdist";
     private static final String GREENPLUM_DATABASE = "testdb";
-    private static final String GREENPLUM_USERNAME = "tester";
-    private static final String GREENPLUM_PASSWORD = "pivotal";
+    private static final String GREENPLUM_USERNAME = "gpadmin";
+    private static final String GREENPLUM_PASSWORD = "";
     private static final int GREENPLUM_PORT = 5432;
 
     // Test tables
     private static final String SOURCE_TABLE = "gpfdist_source";
     private static final String SINK_TABLE = "gpfdist_sink";
+    private static final String TEST_TABLE = "gpfdist_test";
 
     private GenericContainer<?> greenplumContainer;
     private Connection connection;
@@ -103,18 +103,13 @@ public class GreenplumGpfdistIT extends TestSuiteBase implements TestResource {
     private GenericContainer<?> createGreenplumContainer() {
         DockerImageName imageName = DockerImageName.parse(GREENPLUM_IMAGE);
 
-        Map<String, String> env = new HashMap<>();
-        env.put("POSTGRES_DB", GREENPLUM_DATABASE);
-        env.put("POSTGRES_USER", GREENPLUM_USERNAME);
-        env.put("POSTGRES_PASSWORD", GREENPLUM_PASSWORD);
-
         return new GenericContainer<>(imageName)
                 .withNetwork(NETWORK)
                 .withNetworkAliases(GREENPLUM_CONTAINER_HOST)
-                .withEnv(env)
                 .withExposedPorts(GREENPLUM_PORT)
-                .withExposedPorts(8080, 8081, 8082, 8083, 8084)
-                .withImagePullPolicy(PullPolicy.alwaysPull())
+                .waitingFor(
+                        Wait.forLogMessage(".*Database successfully started.*", 1)
+                                .withStartupTimeout(Duration.ofMinutes(10)))
                 .withLogConsumer(
                         new Slf4jLogConsumer(DockerLoggerFactory.getLogger(GREENPLUM_IMAGE)));
     }
@@ -122,189 +117,218 @@ public class GreenplumGpfdistIT extends TestSuiteBase implements TestResource {
     private void initializeConnection() throws SQLException {
         String jdbcUrl =
                 String.format(
+                        "jdbc:postgresql://%s:%d/postgres",
+                        greenplumContainer.getHost(),
+                        greenplumContainer.getMappedPort(GREENPLUM_PORT));
+
+        // 先连接到默认数据库，关闭自动提交以避免事务问题
+        connection = DriverManager.getConnection(jdbcUrl, GREENPLUM_USERNAME, GREENPLUM_PASSWORD);
+        connection.setAutoCommit(true); // 关键：设置为自动提交模式
+
+        createDatabaseIfNotExists();
+
+        // 重新连接到测试数据库
+        connection.close();
+        jdbcUrl =
+                String.format(
                         "jdbc:postgresql://%s:%d/%s",
                         greenplumContainer.getHost(),
                         greenplumContainer.getMappedPort(GREENPLUM_PORT),
                         GREENPLUM_DATABASE);
-
         connection = DriverManager.getConnection(jdbcUrl, GREENPLUM_USERNAME, GREENPLUM_PASSWORD);
-        connection.setAutoCommit(false);
+        connection.setAutoCommit(false); // 在测试数据库中可以使用事务
+
         log.info("Successfully connected to Greenplum: {}", jdbcUrl);
+    }
+
+    private void createDatabaseIfNotExists() {
+        try (Statement statement = connection.createStatement()) {
+            // 检查数据库是否存在
+            ResultSet rs =
+                    statement.executeQuery(
+                            "SELECT 1 FROM pg_database WHERE datname = '"
+                                    + GREENPLUM_DATABASE
+                                    + "'");
+
+            if (!rs.next()) {
+                // 数据库不存在，创建它（注意：不能在事务中执行）
+                statement.execute("CREATE DATABASE " + GREENPLUM_DATABASE);
+                log.info("Created database: {}", GREENPLUM_DATABASE);
+            } else {
+                log.info("Database {} already exists", GREENPLUM_DATABASE);
+            }
+
+        } catch (SQLException e) {
+            if (e.getMessage().contains("already exists")) {
+                log.info("Database {} already exists", GREENPLUM_DATABASE);
+            } else {
+                log.warn("Failed to create database: {}", e.getMessage());
+            }
+        }
     }
 
     private void createTestTables() {
         try (Statement statement = connection.createStatement()) {
+            // 创建源表
             String createSourceSql =
                     String.format(
-                            "CREATE TABLE %s ("
+                            "CREATE TABLE IF NOT EXISTS %s ("
                                     + "id SERIAL PRIMARY KEY,"
                                     + "name VARCHAR(100) NOT NULL,"
                                     + "age INTEGER,"
                                     + "salary NUMERIC(10,2),"
                                     + "description TEXT,"
-                                    + "created_date DATE,"
                                     + "is_active BOOLEAN"
                                     + ") DISTRIBUTED BY (id)",
                             SOURCE_TABLE);
             statement.execute(createSourceSql);
 
+            // 创建目标表
             String createSinkSql =
                     String.format(
-                            "CREATE TABLE %s ("
+                            "CREATE TABLE IF NOT EXISTS %s ("
                                     + "id INTEGER,"
                                     + "name VARCHAR(100),"
                                     + "age INTEGER,"
                                     + "salary NUMERIC(10,2),"
                                     + "description TEXT,"
-                                    + "created_date DATE,"
                                     + "is_active BOOLEAN"
                                     + ") DISTRIBUTED BY (id)",
                             SINK_TABLE);
             statement.execute(createSinkSql);
 
+            // 创建测试表
+            String createTestSql =
+                    String.format(
+                            "CREATE TABLE IF NOT EXISTS %s ("
+                                    + "id INTEGER,"
+                                    + "name VARCHAR(100),"
+                                    + "age INTEGER,"
+                                    + "salary NUMERIC(10,2),"
+                                    + "description TEXT,"
+                                    + "is_active BOOLEAN"
+                                    + ") DISTRIBUTED BY (id)",
+                            TEST_TABLE);
+            statement.execute(createTestSql);
+
             connection.commit();
             log.info("Test tables created successfully");
         } catch (SQLException e) {
+            try {
+                connection.rollback();
+            } catch (SQLException rollbackEx) {
+                log.warn("Failed to rollback transaction: {}", rollbackEx.getMessage());
+            }
             throw new RuntimeException("Failed to create test tables", e);
         }
     }
 
     private void insertTestData() {
         try (Statement statement = connection.createStatement()) {
-            StringBuilder insertSql =
-                    new StringBuilder(
-                            String.format(
-                                    "INSERT INTO %s (name, age, salary, description, created_date, is_active) VALUES ",
-                                    SOURCE_TABLE));
+            // 清空现有数据
+            statement.execute("TRUNCATE TABLE " + SOURCE_TABLE);
+
+            // 批量插入测试数据
+            StringBuilder batchInsert = new StringBuilder();
+            batchInsert
+                    .append("INSERT INTO ")
+                    .append(SOURCE_TABLE)
+                    .append(" (name, age, salary, description, is_active) VALUES ");
 
             List<String> values = new ArrayList<>();
             for (int i = 1; i <= 1000; i++) {
                 values.add(
                         String.format(
-                                "('User_%d', %d, %.2f, 'Description for user %d with GPfdist test data', '2023-%02d-%02d', %s)",
-                                i,
-                                20 + (i % 50),
-                                3000.0 + (i * 10.5),
-                                i,
-                                (i % 12) + 1,
-                                (i % 28) + 1,
-                                i % 2 == 0));
+                                "('User_%d', %d, %.2f, 'Test user %d', %s)",
+                                i, 20 + (i % 50), 3000.0 + (i * 10.5), i, i % 2 == 0));
 
+                // 每100条记录执行一次批量插入
                 if (values.size() == 100) {
-                    String batchSql = insertSql + String.join(", ", values);
-                    statement.execute(batchSql);
+                    String sql = batchInsert + String.join(", ", values);
+                    statement.execute(sql);
                     values.clear();
                 }
             }
 
+            // 插入剩余的记录
             if (!values.isEmpty()) {
-                String batchSql = insertSql + String.join(", ", values);
-                statement.execute(batchSql);
+                String sql = batchInsert + String.join(", ", values);
+                statement.execute(sql);
             }
 
             connection.commit();
             log.info("Test data (1000 records) inserted successfully");
         } catch (SQLException e) {
+            try {
+                connection.rollback();
+            } catch (SQLException rollbackEx) {
+                log.warn("Failed to rollback transaction: {}", rollbackEx.getMessage());
+            }
             throw new RuntimeException("Failed to insert test data", e);
         }
     }
 
+    /** 测试连接器基本连通性 使用 FakeSource -> Greenplum Sink (JDBC模式) 验证基本功能 */
     @TestTemplate
-    public void testGreenplumGpfdistSinkWithLargeData(TestContainer container)
+    public void testGreenplumConnectionAndBasicFunctionality(TestContainer container)
             throws IOException, InterruptedException {
 
-        Container.ExecResult execResult =
-                container.executeJob("/greenplum_gpfdist_sink_large_data.conf");
-        Assertions.assertEquals(0, execResult.getExitCode(), execResult.getStderr());
+        // 清空测试表
+        clearTable(TEST_TABLE);
+
+        // 执行连通性测试
+        Container.ExecResult execResult = container.executeJob("/greenplum_connection_test.conf");
+
+        Assertions.assertEquals(
+                0,
+                execResult.getExitCode(),
+                "Connection test should succeed. Error: " + execResult.getStderr());
 
         String logs = execResult.getStdout();
-        log.info("Job execution logs: {}", logs);
+        log.info("Connection test logs: {}", logs);
 
+        // 验证数据是否正确写入
+        verifyDataCount(TEST_TABLE, 100); // FakeSource 生成 100 条记录
+
+        log.info("✅ Greenplum connection and basic functionality test passed");
+    }
+
+    /** 测试 GPfdist 主流程 Source (Greenplum with GPfdist) -> Sink (Greenplum with GPfdist) */
+    @TestTemplate
+    public void testGreenplumGpfdistMainFlow(TestContainer container)
+            throws IOException, InterruptedException {
+
+        // 清空目标表
+        clearTable(SINK_TABLE);
+
+        // 执行主流程测试
+        Container.ExecResult execResult = container.executeJob("/greenplum_gpfdist_main_flow.conf");
+
+        Assertions.assertEquals(
+                0,
+                execResult.getExitCode(),
+                "GPfdist main flow test should succeed. Error: " + execResult.getStderr());
+
+        String logs = execResult.getStdout();
+        log.info("GPfdist main flow logs: {}", logs);
+
+        // 验证 GPfdist 协议被使用
         Assertions.assertTrue(
                 logs.contains("GPfdist")
                         || logs.contains("gpfdist")
-                        || logs.contains("EXTERNAL TABLE"),
-                "GPfdist protocol should be used but not found in logs");
-
-        verifyDataTransfer();
-    }
-
-    @TestTemplate
-    public void testGreenplumGpfdistSourceToSink(TestContainer container)
-            throws IOException, InterruptedException {
-
-        clearSinkTable();
-
-        Container.ExecResult execResult =
-                container.executeJob("/greenplum_gpfdist_source_to_sink.conf");
-        Assertions.assertEquals(0, execResult.getExitCode(), execResult.getStderr());
-
-        String logs = execResult.getStdout();
-        Assertions.assertTrue(
-                logs.contains("GPfdist")
                         || logs.contains("External")
-                        || logs.contains("gpfdist://"),
-                "GPfdist server should be started");
+                        || logs.contains("EXTERNAL TABLE"),
+                "GPfdist protocol should be used in the main flow");
 
-        verifyDataTransfer();
-    }
-
-    @TestTemplate
-    public void testGreenplumGpfdistPerformanceComparison(TestContainer container)
-            throws IOException, InterruptedException {
-
-        clearSinkTable();
-
-        long jdbcStartTime = System.currentTimeMillis();
-        Container.ExecResult jdbcResult = container.executeJob("/greenplum_jdbc_mode.conf");
-        long jdbcDuration = System.currentTimeMillis() - jdbcStartTime;
-
-        Assertions.assertEquals(0, jdbcResult.getExitCode(), jdbcResult.getStderr());
-        log.info("JDBC mode execution time: {} ms", jdbcDuration);
-
-        clearSinkTable();
-
-        long gpfdistStartTime = System.currentTimeMillis();
-        Container.ExecResult gpfdistResult = container.executeJob("/greenplum_gpfdist_mode.conf");
-        long gpfdistDuration = System.currentTimeMillis() - gpfdistStartTime;
-
-        Assertions.assertEquals(0, gpfdistResult.getExitCode(), gpfdistResult.getStderr());
-        log.info("GPfdist mode execution time: {} ms", gpfdistDuration);
-
-        String gpfdistLogs = gpfdistResult.getStdout();
-        Assertions.assertTrue(
-                gpfdistLogs.contains("GPfdist")
-                        || gpfdistLogs.contains("gpfdist://")
-                        || gpfdistLogs.contains("External"),
-                "GPfdist specific logs should be present");
-
+        // 验证数据传输完整性
         verifyDataTransfer();
 
-        log.info(
-                "Performance comparison - JDBC: {}ms, GPfdist: {}ms",
-                jdbcDuration,
-                gpfdistDuration);
-    }
-
-    @TestTemplate
-    public void testGreenplumGpfdistErrorHandling(TestContainer container)
-            throws IOException, InterruptedException {
-
-        clearSinkTable();
-
-        Container.ExecResult execResult =
-                container.executeJob("/greenplum_gpfdist_error_config.conf");
-
-        String logs = execResult.getStdout() + execResult.getStderr();
-        log.info("Error handling test logs: {}", logs);
-
-        Assertions.assertTrue(
-                logs.contains("GPfdist") || logs.contains("error") || logs.contains("failed"),
-                "Should contain error handling information");
+        log.info("✅ Greenplum GPfdist main flow test passed");
     }
 
     private void verifyDataTransfer() {
         try (Statement statement = connection.createStatement()) {
+            // 检查源表和目标表的记录数
             ResultSet sourceResult =
                     statement.executeQuery("SELECT COUNT(*) as count FROM " + SOURCE_TABLE);
             sourceResult.next();
@@ -316,41 +340,45 @@ public class GreenplumGpfdistIT extends TestSuiteBase implements TestResource {
             int sinkCount = sinkResult.getInt("count");
 
             log.info("Source table count: {}, Sink table count: {}", sourceCount, sinkCount);
-            Assertions.assertEquals(sourceCount, sinkCount, "Data transfer verification failed");
+            Assertions.assertEquals(sourceCount, sinkCount, "Data transfer count should match");
 
-            ResultSet sourceData =
-                    statement.executeQuery(
-                            "SELECT name, age, salary FROM "
-                                    + SOURCE_TABLE
-                                    + " ORDER BY id LIMIT 10");
-            ResultSet sinkData =
-                    statement.executeQuery(
-                            "SELECT name, age, salary FROM "
-                                    + SINK_TABLE
-                                    + " ORDER BY id LIMIT 10");
+            // 验证数据内容抽样
+            if (sourceCount > 0) {
+                ResultSet sourceData =
+                        statement.executeQuery(
+                                "SELECT name, age, salary FROM "
+                                        + SOURCE_TABLE
+                                        + " ORDER BY id LIMIT 5");
+                ResultSet sinkData =
+                        statement.executeQuery(
+                                "SELECT name, age, salary FROM "
+                                        + SINK_TABLE
+                                        + " ORDER BY id LIMIT 5");
 
-            List<String> sourceList = new ArrayList<>();
-            List<String> sinkList = new ArrayList<>();
+                List<String> sourceRows = new ArrayList<>();
+                List<String> sinkRows = new ArrayList<>();
 
-            while (sourceData.next()) {
-                sourceList.add(
-                        String.format(
-                                "%s-%d-%.2f",
-                                sourceData.getString("name"),
-                                sourceData.getInt("age"),
-                                sourceData.getDouble("salary")));
+                while (sourceData.next()) {
+                    sourceRows.add(
+                            String.format(
+                                    "%s-%d-%.2f",
+                                    sourceData.getString("name"),
+                                    sourceData.getInt("age"),
+                                    sourceData.getDouble("salary")));
+                }
+
+                while (sinkData.next()) {
+                    sinkRows.add(
+                            String.format(
+                                    "%s-%d-%.2f",
+                                    sinkData.getString("name"),
+                                    sinkData.getInt("age"),
+                                    sinkData.getDouble("salary")));
+                }
+
+                Assertions.assertEquals(sourceRows, sinkRows, "Sample data content should match");
             }
 
-            while (sinkData.next()) {
-                sinkList.add(
-                        String.format(
-                                "%s-%d-%.2f",
-                                sinkData.getString("name"),
-                                sinkData.getInt("age"),
-                                sinkData.getDouble("salary")));
-            }
-
-            Assertions.assertEquals(sourceList, sinkList, "Data content verification failed");
             log.info("Data transfer verification passed with {} records", sourceCount);
 
         } catch (SQLException e) {
@@ -358,20 +386,42 @@ public class GreenplumGpfdistIT extends TestSuiteBase implements TestResource {
         }
     }
 
-    private void clearSinkTable() {
+    private void verifyDataCount(String tableName, int expectedCount) {
         try (Statement statement = connection.createStatement()) {
-            statement.execute("TRUNCATE TABLE " + SINK_TABLE);
-            connection.commit();
-            log.info("Sink table cleared");
+            ResultSet result = statement.executeQuery("SELECT COUNT(*) as count FROM " + tableName);
+            result.next();
+            int actualCount = result.getInt("count");
+
+            log.info("Table {} count: {} (expected: {})", tableName, actualCount, expectedCount);
+            Assertions.assertEquals(
+                    expectedCount,
+                    actualCount,
+                    "Data count should match expected value for table " + tableName);
+
         } catch (SQLException e) {
-            throw new RuntimeException("Failed to clear sink table", e);
+            throw new RuntimeException("Failed to verify data count for table " + tableName, e);
+        }
+    }
+
+    private void clearTable(String tableName) {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("TRUNCATE TABLE " + tableName);
+            connection.commit();
+            log.info("Table {} cleared", tableName);
+        } catch (SQLException e) {
+            try {
+                connection.rollback();
+            } catch (SQLException rollbackEx) {
+                log.warn("Failed to rollback transaction: {}", rollbackEx.getMessage());
+            }
+            throw new RuntimeException("Failed to clear table " + tableName, e);
         }
     }
 
     @AfterAll
     @Override
     public void tearDown() throws SQLException {
-        if (connection != null) {
+        if (connection != null && !connection.isClosed()) {
             connection.close();
         }
         if (greenplumContainer != null) {

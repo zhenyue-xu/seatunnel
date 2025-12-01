@@ -16,6 +16,7 @@
  */
 package org.apache.seatunnel.connectors.seatunnel.greenplum.source;
 
+import com.google.auto.service.AutoService;
 import org.apache.seatunnel.api.configuration.ReadonlyConfig;
 import org.apache.seatunnel.api.source.Boundedness;
 import org.apache.seatunnel.api.source.SeaTunnelSource;
@@ -32,6 +33,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+@AutoService(SeaTunnelSource.class)
 public class GreenplumSource
         implements SeaTunnelSource<SeaTunnelRow, GreenplumSplit, ArrayList<GreenplumSplit>> {
 

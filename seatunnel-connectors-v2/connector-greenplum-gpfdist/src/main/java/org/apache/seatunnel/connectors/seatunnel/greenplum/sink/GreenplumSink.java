@@ -17,6 +17,7 @@
 
 package org.apache.seatunnel.connectors.seatunnel.greenplum.sink;
 
+import com.google.auto.service.AutoService;
 import org.apache.seatunnel.api.sink.SeaTunnelSink;
 import org.apache.seatunnel.api.sink.SinkWriter;
 import org.apache.seatunnel.api.table.catalog.CatalogTable;
@@ -26,6 +27,7 @@ import org.apache.seatunnel.connectors.seatunnel.greenplum.sink.state.GreenplumC
 
 import java.util.Optional;
 
+@AutoService(SeaTunnelSink.class)
 public class GreenplumSink implements SeaTunnelSink<SeaTunnelRow, Void, GreenplumCommitInfo, Void> {
 
     private final GreenplumSinkOptions options;
